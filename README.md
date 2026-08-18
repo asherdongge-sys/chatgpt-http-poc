@@ -1,58 +1,71 @@
-# ChatGPT HTTP POC
+# chatgpt-http-poc
 
-> Experimental research project for a browserless HTTP client against ChatGPT Web's backend APIs.
+> Experimental transport POC. The original ChatGPT Web backend client is intentionally kept as a diagnostic experiment, not treated as a stable API.
 
-## Goal
+## Gateway POC
 
-Validate whether a logged-in ChatGPT Web session can be used through HTTP only, without launching or controlling a browser.
+The current direction is a local **Agent Gateway**: ChatGPT remains the planner/brain, while a localhost service owns the real workspace and executes typed tools.
 
-The first PoC deliberately does **not** implement browser automation, DOM scraping, API-key authentication, cookie extraction, or anti-abuse bypasses.
+Architecture:
 
-## What is implemented
-
-- Node.js 20+ HTTP client using native `fetch`.
-- `POST /backend-api/conversation` request shape.
-- Bearer access token supplied explicitly through an environment variable.
-- Server-sent event parsing.
-- Basic continuation support via `CHATGPT_CONVERSATION_ID`.
-- Unit tests with mocked HTTP responses.
-
-## Setup
-
-```bash
-pnpm install
-pnpm test
+```text
+ChatGPT / planner
+      |
+      | tool calls
+      v
+Local Agent Gateway :4318
+      |
+      +--> fs.list
+      +--> fs.read
+      +--> fs.write
+      +--> fs.search
+      |
+      v
+Local workspace
 ```
 
-For a direct smoke test:
+The gateway binds to `127.0.0.1` by default, so it is not exposed on the LAN. Set `AGENT_WORKSPACE` to the workspace that the agent is allowed to access.
 
-```bash
-CHATGPT_ACCESS_TOKEN="<your own session access token>" node src/cli.mjs "Reply with exactly HTTP_POC_OK"
-```
-
-PowerShell:
+### Start
 
 ```powershell
-$env:CHATGPT_ACCESS_TOKEN = "<your own session access token>"
-node src/cli.mjs "Reply with exactly HTTP_POC_OK"
+$env:AGENT_WORKSPACE = 'E:\web\browser-coding-agent'
+pnpm install
+pnpm gateway
 ```
 
-No browser is launched by this program.
+Optional local bearer protection:
 
-## Expected outcomes
+```powershell
+$env:GATEWAY_TOKEN = 'replace-with-a-random-local-token'
+pnpm gateway
+```
 
-### Success
+### Endpoints
 
-If the supplied session credential is currently accepted by the backend, the CLI should print the streamed assistant response.
+- `GET /health` — gateway health.
+- `GET /tools` — typed tool catalog.
+- `POST /execute` — execute one tool call.
+- `GET /events` — Server-Sent Events stream for tool lifecycle events.
 
-### 401/403 or a requirements-related error
+Example:
 
-That is useful PoC data. It means the current backend requires additional session/anti-abuse state beyond the bearer token. **Do not work around those controls in this PoC.** Record the response shape and update the protocol research separately.
+```powershell
+Invoke-RestMethod http://127.0.0.1:4318/tools
+Invoke-RestMethod -Method Post http://127.0.0.1:4318/execute -ContentType 'application/json' -Body '{"tool":"fs.list","arguments":{"path":"."}}'
+```
 
-## Important
+## Why this replaces the previous HTTP approach
 
-These are undocumented ChatGPT Web endpoints. They can change or require additional authentication/anti-abuse checks at any time. This repository is for local experimentation only. Do not expose a gateway publicly, commit credentials, or attempt to bypass access controls.
+The previous POC called undocumented `chatgpt.com/backend-api/*` endpoints with a Web access token. Those endpoints are not a stable public API and can require browser session state, cookies, Cloudflare state, device/session headers, and changing frontend metadata. A 403 is therefore expected to be possible even when the same account works in the browser.
 
-## Next milestone
+The gateway deliberately does **not** try to reproduce that private transport. It isolates the local execution layer so that the ChatGPT-side transport can later be replaced without rewriting the filesystem/tool implementation.
 
-If the direct request works, add a tiny local OpenAI-compatible `/v1/chat/completions` adapter around this client. If it does not, inspect the current web authentication flow and determine exactly which non-browser session artifacts are legitimately available to the user before changing the client.
+## Next milestones
+
+1. Add a small adapter from the existing browser Bridge to `/tools` + `/execute`.
+2. Add approval policy for write/execute operations.
+3. Add `terminal.exec` behind an explicit local opt-in and command policy.
+4. Add Git tools (`git.status`, `git.diff`, `git.commit`, `git.push`) as typed operations.
+5. Add a session/job id so multiple ChatGPT conversations can own independent agents.
+6. Add a durable event log and reconnect/resume semantics.
