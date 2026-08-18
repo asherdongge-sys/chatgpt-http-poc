@@ -1,10 +1,10 @@
 import http from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { executeTool, listTools } from './local-tools.mjs';
 
 const HOST = process.env.GATEWAY_HOST || '127.0.0.1';
 const PORT = Number(process.env.GATEWAY_PORT || 4318);
-const TOKEN = process.env.GATEWAY_TOKEN || '';
+const TOKEN = process.env.GATEWAY_TOKEN || randomBytes(24).toString('hex');
 
 const clients = new Set();
 
@@ -13,16 +13,14 @@ function json(res, status, body) {
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
-    'access-control-allow-origin': 'http://127.0.0.1',
+    'access-control-allow-origin': '*',
     'access-control-allow-headers': 'content-type, authorization',
   });
   res.end(payload);
 }
 
 function authorized(req) {
-  if (!TOKEN) return true;
-  const header = req.headers.authorization || '';
-  return header === `Bearer ${TOKEN}`;
+  return (req.headers.authorization || '') === `Bearer ${TOKEN}`;
 }
 
 function publish(event) {
@@ -40,7 +38,7 @@ async function readJson(req) {
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
-      'access-control-allow-origin': 'http://127.0.0.1',
+      'access-control-allow-origin': '*',
       'access-control-allow-methods': 'GET,POST,OPTIONS',
       'access-control-allow-headers': 'content-type, authorization',
     });
@@ -62,7 +60,7 @@ const server = http.createServer(async (req, res) => {
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache, no-store',
       connection: 'keep-alive',
-      'access-control-allow-origin': 'http://127.0.0.1',
+      'access-control-allow-origin': '*',
     });
     res.write(`data: ${JSON.stringify({ type: 'connected', id: randomUUID() })}\n\n`);
     clients.add(res);
@@ -100,6 +98,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Gateway listening on http://${HOST}:${PORT}`);
+  console.log(`Gateway token: ${TOKEN}`);
   console.log(`Tools: http://${HOST}:${PORT}/tools`);
   console.log(`Events: http://${HOST}:${PORT}/events`);
 });
